@@ -1,0 +1,33 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Täglich um 6:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Sync upstream
+        run: |
+          git remote add upstream https://github.com/sipeed/picoclaw.git 2>/dev/null || true
+          git fetch upstream
+          git checkout main
+          git merge upstream/main --no-edit --allow-unrelated-histories || echo "Merge conflicts - manual review needed"
+          git push origin main
+
+      - name: Create sync tag
+        run: |
+          TAG="sync-$(date +%Y%m%d-%H%M%S)"
+          git tag "$TAG"
+          git push origin "$TAG" || true
