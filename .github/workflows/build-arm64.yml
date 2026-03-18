@@ -1,0 +1,81 @@
+name: Build PicoClaw ARM64
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build binary
+        run: |
+          # Headless Build - Keine GUI/Display Abhängigkeiten
+          export CGO_ENABLED=0
+          export GOOS=linux
+          export GOARCH=arm64
+          
+          # Build mit optimierten Flags für S905X (Cortex-A53)
+          go build -ldflags="-s -w -X main.version=$(git describe --tags --always)" \
+                   -trimpath \
+                   -o picoclaw-s905x \
+                   ./cmd/picoclaw 2>/dev/null || \
+          go build -ldflags="-s -w -X main.version=$(git describe --tags --always)" \
+                   -trimpath \
+                   -o picoclaw-s905x \
+                   .  # Fallback: Root-Verzeichnis
+          
+          chmod +x picoclaw-s905x
+          ls -lh picoclaw-s905x
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: build-${{ github.run_number }}
+          release_name: "🦐 Build ${{ github.run_number }} - ARM64 S905X"
+          body: |
+            ## Auto-Build für Amlogic S905X (ARM64)
+            
+            **Optimiert für:**
+            - SoC: Amlogic S905X (Cortex-A53 quad-core)
+            - RAM: <10MB (!)
+            - Headless deployment (keine GUI)
+            - Armbian/Linux aarch64
+            
+            **Binary:** `picoclaw-s905x` (statisch, keine Dependencies)
+            
+            **Installation:**
+            ```bash
+            wget -O /usr/local/bin/picoclaw <download-url>
+            chmod +x /usr/local/bin/picoclaw
+            picoclaw --version
+            ```
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./picoclaw-s905x
+          asset_name: picoclaw-s905x-arm64
+          asset_content_type: application/octet-stream
