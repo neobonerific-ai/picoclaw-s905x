@@ -1,0 +1,56 @@
+name: Auto-Sync & Build PicoClaw (AMD64)
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      build_needed: ${{ steps.sync.outputs.new_commits }}
+    steps:
+      - name: Check and Sync Fork
+        id: sync
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          UPSTREAM_SHA=$(gh api repos/sipeed/picoclaw/commits/main --jq .sha)
+          FORK_SHA=$(gh api repos/${{ github.repository }}/commits/main --jq .sha)
+          
+          if [ "$UPSTREAM_SHA" != "$FORK_SHA" ]; then
+            gh repo sync ${{ github.repository }} -b main --source sipeed/picoclaw --force
+            echo "new_commits=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_commits=false" >> "$GITHUB_OUTPUT"
+          fi
+  build-and-release:
+    needs: check-upstream
+    if: needs.check-upstream.outputs.build_needed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+      - name: Build
+        run: |
+          make build
+          [ -f build/picoclaw ] && mv build/picoclaw picoclaw
+          tar -czvf picoclaw_Linux_amd64.tar.gz picoclaw
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest-amd64 --cleanup-tag -y 2>/dev/null || true
+          gh release create latest-amd64 picoclaw_Linux_amd64.tar.gz \
+            --title "Latest AMD64 Build" \
+            --notes "Auto build vom $(date +%Y-%m-%d)"
